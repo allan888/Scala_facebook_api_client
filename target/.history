@@ -1,3 +1,5 @@
 run
 sbt
 run
+sby run
+run

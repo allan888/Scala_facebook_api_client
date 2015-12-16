@@ -27,10 +27,15 @@ import DefaultJsonProtocol._
 import FriendIdWithTokenJsonProtocol._
 import PersonInfoJsonProtocol._
 import TokenAndPersonInfoJsonProtocol._
-import PhotoMessageWithTokenJsonProtocol._
+import PhotoMessageWithTokenAndKeysJsonProtocol._
 import PostNoIdJsonProtocol._
 import IDArrayJsonProtocol._
-
+import KeyJsonProtocol._
+import Phase1JsonProtocol._
+import Phase2JsonProtocol._
+import KeyAndPlainJsonProtocol._
+import IdAndNameAndPublicArrayJsonProtocol._
+import MessageWithTokenAndIdAndKeysJsonProtocol._
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
 
@@ -54,7 +59,23 @@ class FacebookGoActor extends Actor with FacebookService {
         complete {
           "get -> root path"
         }
+      } ~ path("key" /) {
+        respondWithMediaType(`application/json`) {
+          complete {
+            implicit val timeout = Timeout(10 seconds)
+            val future = userActorSelection ? "getPublicKey"
+            val ret = Await.result(future, Duration.Inf)
+            ret match {
+              case key: String => {
+                println("send client server's public key")
+                Key(key).toJson.toString
+              }
+              case _ => Error("get key error").toJson.toString
+            }
+          }
+        }
       } ~ path("me" / "feed" /) {
+        println("/me/feed/")
         // 这里面是网站的/me/feed/目录
 
         // 下面这行时说token是必须的, otherPara后面有问号是说otherPara是可选的
@@ -109,6 +130,7 @@ class FacebookGoActor extends Actor with FacebookService {
           }
         }
       } ~ path(LongNumber / "feed" /) { l_id =>
+        println("/"+l_id.toString+"/feed/")
 
         parameters('access_token, 'from ? 0, 'num ? 10, 'otherPara.?) { (token, from, num, otherPara) =>
           respondWithMediaType(`application/json`) {
@@ -119,24 +141,41 @@ class FacebookGoActor extends Actor with FacebookService {
                   "test"
                 }
                 case None => {
+                  println("11111")
                   Token(token).getUserIdAndName(userActorSelection) match {
 
                     //error的话如何如何
-                    case err: Error => err.toJson.toString
+                    case err: Error => {
+                      println("22222")
+                      err.toJson.toString
+                    }
 
                     //如果转换用户名成功的话,如何如何
                     case IdAndName(id, name) => {
+                      println("33333")
                       implicit val timeout = Timeout(10 seconds)
                       // 获取网址里面传进来的id的对应的人的timeline
                       val future = userActorSelection ? FeedRequest("own", l_id, from, num)
                       val ini = Await.result(future, Duration.Inf)
                       ini match {
                         case x: Timeline => x.toNodeFormat(contentActorSelection) match {
-                          case x: TimelineNode => x.toJson.toString
-                          case x: Error => x.toJson.toString
-                          case _ => Error("internal error").toJson.toString
+                          case x: TimelineNode => {
+                            println("44444")
+                            x.toJson.toString
+                          }
+                          case x: Error => {
+                            println("55555")
+                            x.toJson.toString
+                          }
+                          case _ => {
+                            println("66666")
+                            Error("internal error").toJson.toString
+                          }
                         }
-                        case x: Error => x.toJson.toString
+                        case x: Error => {
+                          println("77777",l_id)
+                          x.toJson.toString
+                        }
                         case _ => Error("internal error").toJson.toString
                       }
                     }
@@ -150,6 +189,7 @@ class FacebookGoActor extends Actor with FacebookService {
           }
         }
       } ~ path(LongNumber / "friends" /) { l_id =>
+        println("/"+l_id.toString+"/friends/")
 
         parameters('access_token, 'otherPara.?) { (token, otherPara) =>
           respondWithMediaType(`application/json`) {
@@ -168,13 +208,22 @@ class FacebookGoActor extends Actor with FacebookService {
                       val future = friendsListActorSelection ? RequestId("get", l_id)
                       val ini = Await.result(future, Duration.Inf)
                       ini match {
-                        case x: IdAndNameArray => x.toJson.toString
-                        case x: Error => x.toJson.toString
-                        case _ => Error("internal error").toJson.toString
+                        case x: IdAndNameAndPublicArray => x.toJson.toString
+                        case x: Error => {
+                          println("=====get friend list error1=======")
+                          x.toJson.toString
+                        }
+                        case _ => {
+                          println("=====get friend list error2=======")
+                          Error("internal error").toJson.toString
+                        }
                       }
                     }
 
-                    case _ => Error("internal error").toJson.toString
+                    case _ => {
+                      println("=====get friend list error3=======")
+                      Error("internal error").toJson.toString
+                    }
                   }
                 }
               }
@@ -183,6 +232,7 @@ class FacebookGoActor extends Actor with FacebookService {
           }
         }
       } ~ path("me" /) {
+        println("/me/")
         parameters('access_token, 'fields) { (token, fields) =>
           respondWithMediaType(`application/json`) {
             complete {
@@ -210,6 +260,7 @@ class FacebookGoActor extends Actor with FacebookService {
           }
         }
       } ~ path(LongNumber /) { l_id =>
+        println("/"+l_id.toString+"/")
         parameters('access_token) { (token) =>
           respondWithMediaType(`application/json`) {
             complete {
@@ -261,7 +312,48 @@ class FacebookGoActor extends Actor with FacebookService {
     } ~ post {
       // 这里面的请求是 POST 的
       path("getToken" /) {
-        entity(as[UserPass]) {
+        println("post: /getToken")
+        entity(as[Phase1]) {
+          p1 => {
+            respondWithMediaType(`application/json`) {
+              complete {
+                implicit val timeout = Timeout(10 seconds)
+                val p1Future = userActorSelection ? p1
+                val p1Ret = Await.result(p1Future, Duration.Inf)
+                p1Ret match {
+                  case key:Key => {
+                    key.toJson.toString
+                  }
+                  case _ => {
+                    println("========register error")
+                    Error("phase 1 get random number error").toJson.toString
+                  }
+                }
+              }
+            }
+          }
+        } ~ entity(as[Phase2]) {
+          p2 => {
+            respondWithMediaType(`application/json`) {
+              complete {
+                implicit val timeout = Timeout(10 seconds)
+                val p2Future = userActorSelection ? p2
+                val p2Ret = Await.result(p2Future, Duration.Inf)
+                p2Ret match {
+                  case tokenAndId:TokenAndId => {
+                    val fRegFuture = friendsListActorSelection ? RequestId("register",tokenAndId.id)
+                    val fret = Await.result(fRegFuture, Duration.Inf)
+                    fret match {
+                      case x:OK => tokenAndId.toJson.toString
+                      case x => Error("friend list register failed").toJson.toString
+                    }
+                  }
+                  case _ => Error("phase 2 get token error").toJson.toString
+                }
+              }
+            }
+          }
+        } ~ entity(as[UserPass]) {
           info => {
             respondWithMediaType(`application/json`) {
               complete {
@@ -275,6 +367,7 @@ class FacebookGoActor extends Actor with FacebookService {
           }
         }
       } ~ path("register" /) {
+        println("post: /register/")
         respondWithMediaType(`application/json`) {
           entity(as[UserPass]) {
             info => {
@@ -283,9 +376,13 @@ class FacebookGoActor extends Actor with FacebookService {
                   info.register(userActorSelection, friendsListActorSelection) match {
                     case x: ID => {
                       import DefaultJsonProtocol._
+                      println("register done",x.id)
                       x.toJson.toString
                     }
-                    case x: Error => x.toJson.toString
+                    case x: Error => {
+                      println(x.error)
+                      x.toJson.toString
+                    }
                     case _ => Error("internal error").toJson.toString
                   }
                 }
@@ -294,24 +391,26 @@ class FacebookGoActor extends Actor with FacebookService {
           }
         }
       } ~ path(LongNumber / "feed" /) { l_id =>  // user id -> feed, post a new message to (user)'s page
-        entity(as[PhotoMessageWithToken]) {
+        println("post: /"+l_id.toString+"/feed/")
+//        entity(as[PhotoMessageWithTokenAndKeys]) {
+//          msg => {
+//            respondWithMediaType(`application/json`) {
+//              complete {
+//                msg.postMessage(userActorSelection, contentActorSelection, friendsListActorSelection) match {
+//                  case x: ID => x.toJson.toString
+//                  case x: Error => x.toJson.toString
+//                  case _ => Error("internal error").toJson.toString
+//                }
+//              }
+//            }
+//          }
+//        } ~
+        entity(as[MessageWithTokenAndIdAndKeys]) {
           msg => {
             respondWithMediaType(`application/json`) {
               complete {
-                MessageWithTokenAndId(msg.message, "photo", msg.photoData, msg.albumId, msg.access_token, l_id).postMessage(userActorSelection, contentActorSelection, friendsListActorSelection) match {
-                  case x: ID => x.toJson.toString
-                  case x: Error => x.toJson.toString
-                  case _ => Error("internal error").toJson.toString
-                }
-              }
-            }
-          }
-        } ~ entity(as[MessageWithToken]) {
-          msg => {
-            respondWithMediaType(`application/json`) {
-              complete {
-                println("message post")
-                MessageWithTokenAndId(msg.message, "post", "", 0L, msg.access_token, l_id).postMessage(userActorSelection, contentActorSelection, friendsListActorSelection) match {
+                //println("message post")
+                msg.postMessage(userActorSelection, contentActorSelection, friendsListActorSelection) match {
                   case x: ID => x.toJson.toString
                   case x: Error => {
                     println(x.error)
@@ -323,28 +422,29 @@ class FacebookGoActor extends Actor with FacebookService {
             }
           }
         }
-      } ~ path(LongNumber / "friends" /) { l_id => // user id -> get friend
-        entity(as[FriendIdWithToken]) {
+      } ~ path(LongNumber / "friends" /) { l_id => // l_id is my id
+        println("post: /"+l_id.toString+"/friends/")
+        entity(as[FriendIdWithToken]) { // friend's id
           f_id_token => {
             respondWithMediaType(`application/json`) {
               complete {
-                Token(f_id_token.access_token).getUserIdAndName(userActorSelection) match {
-                  case id_name: IdAndName => {
-                    id_name.id == l_id match {
+                Token(f_id_token.access_token).getUserIdAndNameAndPublic(userActorSelection) match {
+                  case id_name_pub: IdAndNameAndPublic => {
+                    id_name_pub.id == l_id match {
                       // id_name.id = me
                       case true => {
                         implicit val timeout = Timeout(10 seconds)
-                        val future1 = userActorSelection ? RequestId("getUsername", f_id_token.friend_id)
+                        val future1 = userActorSelection ? RequestId("getUsernameAndPublic", f_id_token.friend_id)
                         val ini1 = Await.result(future1, Duration.Inf)
                         ini1 match {
-                          case x: IdAndName => {
-                            val future2 = friendsListActorSelection ? RequestIdIdAndName("add", l_id, x)
+                          case x: IdAndNameAndPublic => {
+                            val future2 = friendsListActorSelection ? RequestIdIdAndNameAndPublic("add", l_id, x)
                             val ini2 = Await.result(future2, Duration.Inf)
                             ini2 match {
                               case y: OK => {
-                                val future3 = friendsListActorSelection ? RequestIdIdAndName("add", x.id, id_name)
+                                val future3 = friendsListActorSelection ? RequestIdIdAndNameAndPublic("add", x.id, id_name_pub)
                                 val ini3 = Await.result(future3, Duration.Inf)
-                                ini2 match {
+                                ini3 match {
                                   case z: OK => z.toJson.toString
                                   case z: Error => {
                                     println(z.error)
@@ -363,7 +463,10 @@ class FacebookGoActor extends Actor with FacebookService {
                           case _ => Error("internal error").toJson.toString
                         }
                       }
-                      case _ => Error("token does not match user id").toJson.toString
+                      case _ => {
+                        println(id_name_pub.id,l_id)
+                        Error("token does not match user id").toJson.toString
+                      }
                     }
                   }
                   case _ => Error("invalid token").toJson.toString
@@ -374,6 +477,7 @@ class FacebookGoActor extends Actor with FacebookService {
           }
         }
       } ~ path("me" /) {
+        println("post: /me/")
         entity(as[TokenAndPersonInfo]) {
           t_info => {
             respondWithMediaType(`application/json`) {
@@ -391,6 +495,7 @@ class FacebookGoActor extends Actor with FacebookService {
           }
         }
       } ~ path("album" /) {
+        println("post: /album")
         import TokenAndAlbumInfoJsonProtocol._
         entity(as[TokenAndAlbumInfo]) {
           t_info => {
@@ -409,6 +514,7 @@ class FacebookGoActor extends Actor with FacebookService {
           }
         }
       } ~ path(LongNumber /) { l_num =>// any node is, could be person, album or post, this means update this node's info
+        println("post: /"+l_num.toString+"/")
         import TokenAndAlbumInfoJsonProtocol._
         entity(as[TokenAndPersonInfo]) {
           t_info => {
@@ -467,6 +573,7 @@ class FacebookGoActor extends Actor with FacebookService {
     } ~ delete {
       path(LongNumber /) {
         l_num =>
+        println("delete: /"+l_num.toString+"/")
           parameters('access_token) {
             (token) =>
               respondWithMediaType(`application/json`) {
